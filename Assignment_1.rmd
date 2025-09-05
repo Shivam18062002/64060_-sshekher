@@ -15,7 +15,7 @@ ev_data$Age <- 2025 - ev_data$Model.Year
 summary(ev_data$Age)
 
 
-#Histogram to show quantitative
+#Histogram to show quantitative variable
 hist(ev_data$Electric.Range,
      main = "Distribution of Electric Range",
      xlab = "Electric Range (miles)",
