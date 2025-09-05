@@ -1,0 +1,30 @@
+ev_data <- read.csv("Electric_Vehicle_Population_Data.csv")
+
+#Quantitative Variable
+summary(ev_data$Model.Year)
+summary(ev_data$Electric.Range)
+
+
+#Categorical Variables
+table(ev_data$Make)[1:10]
+table(ev_data$Model)[1:10]
+
+
+#Transform the variable
+ev_data$Age <- 2025 - ev_data$Model.Year
+summary(ev_data$Age)
+
+
+#Histogram to show quantitative variable
+hist(ev_data$Electric.Range,
+     main = "Distribution of Electric Range",
+     xlab = "Electric Range (miles)",
+     col = "skyblue", border = "white")
+
+
+
+#Scatterplot
+plot(ev_data$Model.Year, ev_data$Electric.Range,
+     main = "Model Year vs. Electric Range",
+     xlab = "Model Year", ylab = "Electric Range",
+     pch = 19, col = "darkgreen")
