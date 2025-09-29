@@ -1,0 +1,193 @@
+---
+title: "Assignment 2"
+author: "Shivam Shekher"
+date: "2025-09-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# k-NN for classification
+#Loading required libraries
+```{r}
+#install.packages(c("caret", "class", "gmodels", "dplyr", "ISLR"))
+library(caret)
+library(class)
+library(gmodels)
+library(dplyr)
+library(ISLR) 
+set.seed(123)
+```
+
+
+
+#Loading dataset
+```{r}
+# Load dataset
+df <- read.csv("UniversalBank.csv")
+
+# Drop ID and ZIP
+df <- df %>% select(-ID, -ZIP.Code)
+
+```
+
+#Convert categorical variable to dummy variables using caret
+```{r}
+# Convert Personal.Loan to factor
+df$Personal.Loan <- factor(df$Personal.Loan, levels = c(0,1))
+
+# One-hot encode Education (3 levels)
+df$Education <- factor(df$Education, levels = c(1,2,3))
+dummies <- model.matrix(~ Education - 1, data=df)
+colnames(dummies) <- c("Education_1","Education_2","Education_3")
+df <- cbind(df %>% select(-Education), dummies)
+
+
+```
+
+#Dividing data into training and validation set
+```{r}
+# Partition 60% train / 40% validation
+trainIndex <- createDataPartition(df$Personal.Loan, p=0.6, list=FALSE)
+train <- df[trainIndex, ]
+valid <- df[-trainIndex, ]
+
+# Normalize predictors
+preProc <- preProcess(train %>% select(-Personal.Loan), method=c("range"))
+trainX <- predict(preProc, train %>% select(-Personal.Loan))
+validX <- predict(preProc, valid %>% select(-Personal.Loan))
+
+trainY <- train$Personal.Loan
+validY <- valid$Personal.Loan
+```
+
+#Preparing Customer Data
+```{r}
+# Create new customer
+new_customer <- data.frame(
+  Age=40, Experience=10, Income=84, Family=2, CCAvg=2,
+  Mortgage=0, Securities.Account=0, CD.Account=0,
+  Online=1, CreditCard=1,
+  Education_1=0, Education_2=1, Education_3=0
+)
+
+# Matching the variable order
+new_customer <- new_customer[, names(trainX)]
+
+# Normalize using training preproc before knn prediction
+new_customerX <- predict(preProc, new_customer)
+
+# k=1 prediction
+knn1_pred <- knn(train=trainX, test=new_customerX, cl=trainY, k=1, prob=TRUE)
+knn1_pred
+
+
+#How would this customer be classified?
+
+#The customer in this case would be classified according to the nearest neighbor of the customer with k=1. Due to the structure of the dataset, the classification is likely to be 0 (no loan acceptance) but this result is not stable and can change depending on the impact of the particular neighbor in the training partition.
+
+
+```
+
+#Choosing k to Balance Overfitting and Underfitting
+```{r}
+
+# Use caret::train to tune k
+ctrl <- trainControl(method="cv", number=5) # 5-fold CV on training
+knn_tune <- train(
+  x = trainX, y = trainY,
+  method = "knn",
+  tuneGrid = data.frame(k=seq(1,25,2)),
+  trControl = ctrl,
+  preProcess = c("center","scale") # caret will scale internally too
+)
+knn_tune
+plot(knn_tune)
+best_k <- knn_tune$bestTune$k
+best_k
+
+#What is a choice of k that balances between overfitting and ignoring predictors?
+
+#A value of k usually chosen between 5 and 15 is usually a trade off between overfitting (very small k) and missing information on predictors (very large k). In reality, we choose the very k based on the results of models on the validation set. This makes the model responsive to significant customer variations and not too much affected by random noise.
+
+```
+
+#Displaying confusion matrix for validation data using the best k.
+
+```{r}
+
+# Predicting validation set
+best_pred_val <- knn(
+  train = trainX, test = validX, cl = trainY,
+  k = best_k
+)
+cm_val <- confusionMatrix(best_pred_val, validY, positive="1")
+cm_val
+
+
+```
+
+#Classify Given Customer with Best k
+```{r}
+#Classifying the customer:(Age = 40, Experience = 10, Income = 84, Family = 2, CCAvg = 2, Education_1 = 0, Education_2 = 1, Education_3 = 0, Mortgage = 0, Securities Account = 0, CD Account = 0, Online = 1 and Credit Card = 1) using the best k.
+
+knn_best_pred_customer <- knn(
+  train=trainX, test=new_customerX, cl=trainY, k=best_k, prob=TRUE
+)
+knn_best_pred_customer
+
+
+```
+#Repartitioning into 50% train, 30% validation, 20% test. Compare confusion matrices.
+
+```{r}
+
+# Split data 50/30/20
+set.seed(123)
+trainIndex50 <- createDataPartition(df$Personal.Loan, p=0.5, list=FALSE)
+train50 <- df[trainIndex50, ]
+temp <- df[-trainIndex50, ]
+valIndex30 <- createDataPartition(temp$Personal.Loan, p=0.6, list=FALSE) 
+val30 <- temp[valIndex30, ]
+test20 <- temp[-valIndex30, ]
+
+# Normalize using 50% training set
+preProc2 <- preProcess(train50 %>% select(-Personal.Loan), method=c("range"))
+train50X <- predict(preProc2, train50 %>% select(-Personal.Loan))
+val30X <- predict(preProc2, val30 %>% select(-Personal.Loan))
+test20X <- predict(preProc2, test20 %>% select(-Personal.Loan))
+
+train50Y <- train50$Personal.Loan
+val30Y <- val30$Personal.Loan
+test20Y <- test20$Personal.Loan
+
+# Train confusion (LOOCV to avoid self-predict bias)
+train_pred <- knn.cv(train50X, cl=train50Y, k=best_k)
+cm_train <- confusionMatrix(train_pred, train50Y, positive="1")
+
+# Validation 30%
+val_pred <- knn(train=train50X, test=val30X, cl=train50Y, k=best_k)
+cm_val30 <- confusionMatrix(val_pred, val30Y, positive="1")
+
+# Test 20%
+test_pred <- knn(train=train50X, test=test20X, cl=train50Y, k=best_k)
+cm_test20 <- confusionMatrix(test_pred, test20Y, positive="1")
+
+cm_train
+cm_val30
+cm_test20
+#The 50/30/20 split confusion matrix analysis.The accuracy of the three sets (train: 95.1, val: 95.7 and test: 94.9) is very similar. Sensitivity on any of the splits is moderate (~0.55 to 0.63).This consistency demonstrates that the model is generalizable: There is no significant overfitting or underfitting.The minor decrease in the accuracy of the validation and test is caused by the unseen data. Generally, there is no dramatic change in performance and the selected k is good in terms of balance of new customers.
+```
+
+
+
+
+
+
+
+
+
