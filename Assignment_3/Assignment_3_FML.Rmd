@@ -1,0 +1,282 @@
+---
+title: "Assignment_3"
+author: "Shivam Shekher"
+date: "2025-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Step A: Data Preparation and Pivot Table with Online, CC, and Loan
+```{r}
+#Q1. Create a pivot table for the training data with Online as a column variable, CC as a row variable, and Loan as a secondary row variable. The values inside the table should convey the count. In R use functions melt() and cast(), or function table(). In Python, use panda dataframe methods melt() and pivot().
+
+
+
+# Load necessary libraries
+library(dplyr)
+library(reshape2)
+library(e1071)  # For naiveBayes()
+
+# Load data
+df <- read.csv('UniversalBank.csv')
+
+# Partition the data: 60% training, 40% validation
+set.seed(1)
+train_idx <- sample(seq_len(nrow(df)), size = 0.6 * nrow(df))
+train <- df[train_idx, ]
+valid <- df[-train_idx, ]
+
+
+# Create pivot table with CC and Loan in rows and Online in columns
+pivot <- table(train$CreditCard, train$Personal.Loan, train$Online)
+
+# Convert slices for Online=0 and Online=1 to matrices
+pivot_online_0 <- as.matrix(pivot[, , "0"])
+pivot_online_1 <- as.matrix(pivot[, , "1"])
+
+# Printing in a visually clear form
+cat("Pivot table for Online = 0:\n")
+print(pivot_online_0)
+
+cat("\nPivot table for Online = 1:\n")
+print(pivot_online_1)
+
+
+
+#Interpretation: In Step A, Creation and Interpretation of Pivot Table. I used a three-dimensional pivot table (or contingency table) to summarize the counts of customers in the training dataset in the Step A, depending on three categorical variables:
+
+#CreditCard (do the customer carry a credit card issued by a bank; 0 = No, 1 = Yes)
+
+#Personal.Loan (Did the customer take the personal loan; 0 No, 1 Yes)
+
+#Online (do the online banking services use the services; values 0 = No, 1 = Yes)
+
+#The table is divided on two "slices" in accordance with each Online (0 or 1). The tables consist of each a 2-by-2 table of counts of customers by CreditCard (rows) and Personal.Loan (columns).
+
+```
+
+
+#Step B: Compute Conditional Probability from Pivot Table
+```{r}
+#Q2. Consider the task of classifying a customer who owns a bank credit card and is actively using online banking services. Looking at the pivot table, what is the probability that this customer will accept the loan offer? [This is the probability of loan acceptance (Loan = 1) conditional on having a bank credit card (CC = 1) and being an active user of online banking services (Online = 1)].
+
+
+
+# Extract counts for CC=1, Online=1
+cc1_online1_loan0 <- pivot["1", "0", "1"]
+cc1_online1_loan1 <- pivot["1", "1", "1"]
+
+# Probability loan = 1 given CC=1 and Online=1
+prob_loan_given_cc_online <- cc1_online1_loan1 / (cc1_online1_loan0 + cc1_online1_loan1)
+prob_loan_given_cc_online
+
+#Interpretation: The likelihood of the customer taking the personal loan offer, with the training data indicates a 9.1 percentage likelihood that a customer with a bank credit card and online banking will take the personal loan offer.
+
+#This is in line with the intuition that the loan acceptance is fairly uncommon (approximately 9.6% in general) and the loan acceptance rate of this group matches the baseline.
+```
+
+
+#Step C: Pivot Tables for Loan vs Online and Loan vs CC
+```{r}
+#Q3. Create two separate pivot tables for the training data. One will have Loan (rows) as a function of Online (columns) and the other will have Loan (rows) as a function of CC.
+
+
+
+# Pivot table Loan (row) by Online (column)
+pivot_loan_online <- table(train$Personal.Loan, train$Online)
+pivot_loan_online
+
+# Pivot table Loan (row) by CC (column)
+pivot_loan_cc <- table(train$Personal.Loan, train$CreditCard)
+pivot_loan_cc
+
+#Interpretation: These pivot tables summarize loan acceptance distribution over Online banking activity and credit card ownership individually.
+
+#The rows in each table will be equal to the Personal.Loan statuses: 0 = did not accept loan, 1 = accepted loan.
+
+#The columns of every table are associated with one predictor: Online (No=0, Yes=1) or CreditCard (No=0, Yes=1).
+
+#The tables provide the summary of the marginal relationship between loan acceptance and each predictor separately, holding the other predictor constant.As an example, in pivot_loan online, we would be able to observe the number of customers who accepted or rejected the loan among the online users (Online=1) and non-users (Online=0).
+
+#Likewise, pivot_loan_cc indicates the distribution of the number of loan acceptances of credit card holders and non-card holders.
+
+#The step assists in knowing the individual relationship each of the predictors has with the loan acceptance and then combining them in the naive Bayes model.
+```
+
+#Step D: Compute Required Probabilities
+```{r}
+#Q4. Compute the following quantities [P(A | B) means “the probability ofA given B”]:
+#i. P(CC = 1 | Loan = 1) (the proportion of credit card holders among the loan acceptors)
+#ii. P(Online = 1 | Loan = 1)
+#iii. P(Loan = 1) (the proportion of loan acceptors)
+#iv. P(CC = 1 | Loan = 0)
+#v. P(Online = 1 | Loan = 0)
+#vi. P(Loan = 0)
+
+
+
+
+
+# Convert CreditCard and Online to binary indicators if needed
+train$CreditCard_bin <- ifelse(train$CreditCard > 0, 1, 0)
+train$Online_bin <- ifelse(train$Online > 0, 1, 0)
+
+# Subsets based on loan acceptance
+loan_acceptors <- train[train$Personal.Loan == 1, ]
+loan_rejectors <- train[train$Personal.Loan == 0, ]
+
+# Compute probabilities conditional on loan acceptance
+p_cc_loan1 <- mean(loan_acceptors$CreditCard_bin) 
+p_online_loan1 <- mean(loan_acceptors$Online_bin)  
+
+# Compute overall loan acceptance probability
+p_loan1 <- mean(train$Personal.Loan)               
+
+# Compute probabilities conditional on loan rejection
+p_cc_loan0 <- mean(loan_rejectors$CreditCard_bin)  
+p_online_loan0 <- mean(loan_rejectors$Online_bin)  
+
+# Compute overall loan rejection probability
+p_loan0 <- 1 - p_loan1                              
+
+# Print results
+list(
+  p_cc_loan1 = p_cc_loan1,
+  p_online_loan1 = p_online_loan1,
+  p_loan1 = p_loan1,
+  p_cc_loan0 = p_cc_loan0,
+  p_online_loan0 = p_online_loan0,
+  p_loan0 = p_loan0
+)
+
+
+
+#Interpretation: These probabilities show how owning a credit card and active online usage are distributed among loan acceptors and rejectors.
+#Around 28% of customers who accepted the loan hold a credit card, slightly lower than the 29% among rejectors.
+#Online banking usage is slightly higher among loan acceptors (60%) than rejectors (58%), showing it as a mildly positive factor for loan acceptance.
+#The probabilities confirm that loan acceptance is comparatively rare.
+
+#These values can be confidently used in the naive Bayes formula for subsequent calculations, as they represent true conditional probabilities based on correctly coded binary variables.
+
+```
+
+
+#Step E: Naive Bayes Probability Calculation
+```{r}
+#Q5. Use the quantities computed above to compute the naive Bayes probability P(Loan = 1 | CC = 1, Online = 1).
+
+
+
+# Using Step D output probabilities
+p_cc_loan1 <- 0.28          # P(CreditCard=1 | Loan=1)
+p_online_loan1 <- 0.6036    # P(Online=1 | Loan=1)
+p_loan1 <- 0.0917           # P(Loan=1)
+
+# Compute marginal probabilities from training data (binary variables)
+p_cc1 <- mean(train$CreditCard_bin)  # P(CreditCard=1)
+p_online1 <- mean(train$Online_bin)  # P(Online=1)
+
+# Calculate naive Bayes conditional probability
+nb_prob <- (p_cc_loan1 * p_online_loan1 * p_loan1) / (p_cc1 * p_online1)
+
+# Print result
+nb_prob
+
+
+#Interpretation: This approximate probability assumes independence between CC and Online usage given Loan status.
+
+#The probability of naive Bayes using the given code is estimated to be 9.05%. This implies that based on the model, a customer who owns a credit card issued by a bank and is a strong online banking user will have an approximate likelihood of 9.05 percent of accepting to take the personal loan offer. The result is calculated by dividing the conditional probability of possessing a credit card and utilizing online banking amongst loan approvers and then dividing it by the total loan approval rate and then standardizing the result with the general rates of these characteristics within the customer base.
+
+#The empirical loan acceptance rate conditioned on these features (approximately 9.1) calculated directly off of the training data is close to the output. Such a similarity indicates that the naive Bayes independence assumption is a reasonable hypothesis as concerns these two predictors with this dataset.
+
+#Thus, the probability estimate in the model is accurate when it comes to predicting acceptance of a loan in the presence of these two features and offers valuable information about the behavior of a customer and justifies positioning marketing efforts.
+
+```
+
+
+#Step F: Compare Pivot Table Probability and Naive Bayes Estimate
+```{r}
+#Q6. Compare this value with the one obtained from the pivot table in (B). Which is a more accurate estimate?
+
+
+
+
+cat('Pivot Table Probability =', prob_loan_given_cc_online, '\n')
+cat('Naive Bayes Estimate =', nb_prob, '\n')
+
+
+#Interpretation:The two probabilities are quite similar being less than 0.05 percentage points different. 
+
+#This close match means:
+#The pivot table probability will indicate the direct frequency of customers with a credit card and active online banking who took up the loan in the training data. The naive Bayes estimate estimates the same probability based on a set of conditional independence assumptions by multiplying the individual feature probabilities and dividing them by their marginal.
+#The similarity affirms that the naive Bayes assumption that the Online usage and the Credit Card ownership are independent (when loan is accepted) is reasonably true in this dataset and feature set.
+
+#The naive Bayes model, therefore, will give a good easy-to-understand estimate of the probability of loan acceptance that is very close to the real data, without the complex joint probability estimates associated with the naive Bayes model.
+
+```
+
+#Step G: Key Entries Required from Table
+```{r}
+#Q7. Which of the entries in this table are needed for computing P(Loan = 1 | CC = 1, Online = 1)? Run naive Bayes on the data. Examine the model output on training data, and find the entry that corresponds to P(Loan = 1 | CC = 1, Online = 1). Compare this to the number you obtained in (E).
+
+
+# 1. Create binary indicator variables
+train$CreditCard_bin <- ifelse(train$CreditCard > 0, 1, 0)
+train$Online_bin <- ifelse(train$Online > 0, 1, 0)
+
+# 2. Create the 3D pivot table: CreditCard_bin x Personal.Loan x Online_bin
+pivot <- table(train$CreditCard_bin, train$Personal.Loan, train$Online_bin)
+
+# 3. Extract counts needed for empirical probability
+numerator <- pivot["1", "1", "1"]                         # Count(CreditCard=1, Loan=1, Online=1)
+denominator <- pivot["1", "0", "1"] + pivot["1", "1", "1"] # Total count with CreditCard=1, Online=1
+
+# Empirical probability from pivot
+empirical_prob <- numerator / denominator
+cat("Empirical P(Loan=1 | CreditCard=1, Online=1):", empirical_prob, "\n")
+
+# 4. Train naive Bayes model using binary features
+train$Personal.Loan <- as.factor(train$Personal.Loan)  # Convert target to factor
+nb_model <- naiveBayes(Personal.Loan ~ CreditCard_bin + Online_bin, data = train)
+
+# 5. Predict probabilities for new data point: CreditCard=1, Online=1
+test_instance <- data.frame(CreditCard_bin = 1, Online_bin = 1)
+model_pred <- predict(nb_model, test_instance, type = "raw")
+cat("Naive Bayes model P(Loan=0 | CC=1, Online=1):", model_pred[1, "0"], "\n")
+cat("Naive Bayes model P(Loan=1 | CC=1, Online=1):", model_pred[1, "1"], "\n")
+
+# 6. Calculate naive Bayes formula probability from Step D probabilities
+p_cc_loan1 <- mean(train$CreditCard_bin[train$Personal.Loan == 1])
+p_online_loan1 <- mean(train$Online_bin[train$Personal.Loan == 1])
+p_loan1 <- mean(as.numeric(as.character(train$Personal.Loan)))
+
+p_cc1 <- mean(train$CreditCard_bin)
+p_online1 <- mean(train$Online_bin)
+
+nb_prob_formula <- (p_cc_loan1 * p_online_loan1 * p_loan1) / (p_cc1 * p_online1)
+cat("Naive Bayes formula estimate P(Loan=1 | CC=1, Online=1):", nb_prob_formula, "\n")
+
+#The calculations required by the entries of the pivot table.
+#P(Loan=1| CreditCard=1, Online=1) represent the number of customers who have a credit card and use online banking and are further divided into those who have accepted the loan and those who have not. In particular we need the number of those loan acceptors who have, CreditCard=1 and Online=1 using numerator, and the comprehensive amount of customers with CreditCard=1 and Online=1 (both acceptors and non-acceptors of loans) as the denominator. The ratio provides the empirical conditional probability of the data.
+
+#Once I have run the naive Bayes model that has been trained on these binary predictors, I analyzed the probability that the customer with,the probability predicted.
+
+#CreditCard=1 and Online=1 accepting the loan. It is this model based probability that is in close agreement with the empirical probability based on the pivot table and naive Bayes formula estimate in Step E. The fact that these values are closely approximated lends credence to the fact that the naive Bayes assumption of the conditional independence of the predictors in this case, given the acceptance of the loan, is accurate to a rather high degree. Therefore, the naive Bayes model makes an accurate and easy to understand estimate on the probability of the customer accepting the loan based on the credit card ownership and being an internet banking user.
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
