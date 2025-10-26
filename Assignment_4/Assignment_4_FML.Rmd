@@ -1,0 +1,218 @@
+---
+title: "Assignment_4"
+author: "Shivam Shekher"
+date: "2025-10-19"
+output: html_document
+---
+
+# Loading Required Libraries and the Pharmaceutical Dataset
+```{r setup}
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)   
+
+
+
+#Loading dataset Pharmaceuticals.csv
+pharma <- read.csv("Pharmaceuticals.csv", stringsAsFactors = FALSE)
+
+# Show the first rows to confirm the data loaded correctly
+head(pharma)
+
+# Show the structure (column names and types)
+str(pharma)
+
+#Interpretation:
+  #This step initializes the analytical environment by loading all necessary R libraries and the pharmaceutical dataset. Each library serves a specific function—tidyverse and dplyr simplify data manipulation, cluster and factoextra enable clustering and visualization, while ggplot2 and gridExtra enhance the graphical presentation of results. Together, these packages form the foundation for performing, interpreting, and presenting the k-Means clustering analysis effectively.
+```
+
+
+# 1. Selecting and Scaling Numeric Variables
+
+```{r}
+# Select only numeric columns 3–9 (since 1–2 are identifiers)
+num_vars <- pharma[, c("Market_Cap", "Beta", "PE_Ratio", "ROE", "ROA", "Asset_Turnover", "Leverage")]
+
+# Scale the numeric data for equal weight across variables
+num_scaled <- scale(num_vars)
+
+# Confirm scaling
+summary(num_scaled)
+
+#Interpretation:
+
+# The part of work in this step is the preparation of the dataset to be used in clustering, that is, isolating the numeric variables and standardizing them. Quantitative variables are the only variables which are selected i.e. Market Capitalization, Beta, P/E Ratio, ROE, ROA, Asset Turnover group and Leverage; such non-numeric variables as company names do not add any value to distance-based algorithms such as k-Means. This makes the clustering exercise dependent on quantifiable financial features only.
+
+# Scaling is an important preprocess measure since the variables are in very different scales. E.g. In billions Market Capitalization can be, in percentages or ratios ROE or Beta. In the absence of scaling, variables whose numeric ranges are larger would dominate the distance calculations to bias the clustering output. Normalization of the data converts all the variables to a mean of zero and a standard deviation of one. This equal weighting enables the algorithm to be able to determine similarity of companies solely by their relative financial structure and this guarantees that the process of clustering is done impartially and without any bias.
+
+
+```
+
+
+# 2. Determining the Optimal Number of Clusters (k)
+
+```{r}
+# Use Elbow and Silhouette methods to find optimal k
+set.seed(123)
+p1 <- fviz_nbclust(num_scaled, kmeans, method = "wss") + ggtitle("Elbow Method")
+p2 <- fviz_nbclust(num_scaled, kmeans, method = "silhouette") + ggtitle("Silhouette Method")
+grid.arrange(p1, p2, ncol = 2)
+
+
+#Interpretation:
+
+# The selection of the best number of clusters (k) is a very important process in any k-Means analysis since it directly influences the quality of the grouping of the data. In this case, two common techniques, an Elbow Method and a Silhouette Method, are used to determine an appropriate value of k. The Elbow Method takes the sum of squares within the clusters (WSS) and seeks a point at which the decrease in WSS starts to flatten out, and resembles an elbow. This point shows the point at which addition of extra clusters does not significantly improve model performance.
+
+# The Silhouette Method, in its turn, compares the cohesiveness and separation of the clusters by computing the Silhouette coefficient at various values of k. An increase in the silhouette value implies that the data points are well fitted to the clusters that they belong to, and ill fitted to the surrounding clusters. The results of both plots allow one to note that the optimal number of clusters would be between k = 3 and k = 4. This implies that pharmaceutical companies in the sample can be further separated into three or four different financial profiles which depict the financial strength and market performance of the companies.
+
+
+```
+
+
+
+# 3. Apply k-Means Clustering
+
+```{r}
+# Apply k-Means with chosen k (e.g., 3 clusters)
+set.seed(123)
+k3 <- kmeans(num_scaled, centers = 3, nstart = 25)
+
+# View cluster summary
+k3
+
+
+#Interpretation:
+# After identifying the optimal number of clusters (k = 3) from the previous step, the k-Means algorithm is applied to group the pharmaceutical firms into three distinct clusters. The set.seed(123) ensures reproducibility, while nstart = 25 runs the algorithm multiple times to minimize the chances of converging to a local minimum. The resulting output displays important details such as the number of firms in each cluster, the total within-cluster sum of squares (which indicates compactness), and the cluster centroids.
+
+# Each centroid represents the average standardized score of all variables within that cluster—essentially summarizing the “financial profile” of companies in that group. Firms belonging to the same cluster share similar financial characteristics such as market capitalization, profitability ratios, and leverage. This clustering helps to segment the pharmaceutical companies based on comparable performance indicators, enabling easier interpretation of which firms are financially strong, moderate, or weak relative to others.
+
+```
+
+
+# 4. Examine Cluster Centroids        
+
+```{r}
+# View cluster centroids
+
+centroids <- as.data.frame(k3$centers)
+centroids
+
+
+#Interpretation (Centroid-Based):
+
+#Each centroid indicates the financial characteristics of that cluster. For example:
+
+# 1. Cluster 1: Firms with high Market Cap and ROE (large, stable firms).
+# 2. Cluster 2: Firms with moderate returns but high leverage (aggressive or expansion-focused firms).
+# 3. Cluster 3: Firms with low Market Cap, lower returns (smaller or riskier players).
+
+#By comparing the relative centroid values, we see clear strategic and financial distinctions among firm types.
+
+```
+
+
+
+
+# 5. Visual Interpretation of K-Means Cluster Formation Among Pharmaceutical Firms
+
+```{r}
+fviz_cluster(k3, data = num_scaled, ellipse.type = "convex", geom = "point",
+main = "k-Means Clustering of Pharmaceutical Firms")
+
+
+#Interpretation:
+
+# The visualization generated by fviz_cluster() provides an insightful graphical interpretation of how the 21 pharmaceutical firms are grouped based on their financial and operational indicators. Each point in the plot represents a firm positioned in a reduced two-dimensional space derived from the scaled numerical variables. The convex hulls (ellipses) around the clusters highlight the boundaries and spread of each group, helping to clearly distinguish one segment of firms from another.
+
+# In this visualization, the three distinct clusters (from the k3 model) indicate that firms exhibit notable differences in their financial performance metrics—such as profitability ratios, R&D spending, revenue, and asset base. The separation between clusters suggests that the k-means algorithm effectively identified meaningful patterns in the data:
+
+#Cluster 1 may represent financially strong and innovation-driven firms with high R&D and sales growth.
+#Cluster 2 could consist of moderately performing firms maintaining stable but less aggressive growth.
+#Cluster 3 might include firms with lower financial indicators or those focusing on niche markets.
+
+#The clarity of boundaries in the 2D visualization validates that the chosen variables have high discriminative power in differentiating firm profiles. Overall, this cluster plot provides a concise and visually intuitive summary of how pharmaceutical companies differ in their financial structure and strategic orientation.
+
+```
+
+
+# 6. Assigning Cluster Labels to Firms for Comparative Evaluation
+
+```{r}
+pharma$Cluster <- as.factor(k3$cluster)
+head(pharma[, c("Symbol", "Name", "Cluster")])
+
+
+#Interpretation:
+#After running the k-means clustering algorithm, each pharmaceutical firm is now assigned a specific cluster label, which is added back to the main dataset as a new column named ‘Cluster’. This step connects the analytical results with the original company information, creating a unified dataset that combines both numerical insights and firm-specific attributes.
+
+# By incorporating these cluster labels, it becomes possible to analyze and compare the characteristics of different firm groups using additional variables such as location, exchange type, and recommendation status. For instance, analysts can observe whether firms belonging to a particular cluster share common market behaviors, operate within similar geographic areas, or receive similar investment ratings.
+
+# This integration transforms the clustering results from abstract numerical groupings into practical, interpretable business segments. It enables a clearer understanding of how financial and operational patterns vary across firms, supporting better strategic analysis, benchmarking, and decision-making within the pharmaceutical industry.
+```
+
+
+
+# 7. Analyze Non-Numeric Variables (Q c)
+
+```{r}
+# If additional columns exist (Recommendation, Location, Exchange)
+
+table(pharma$Cluster, pharma$Location)
+table(pharma$Cluster, pharma$Exchange)
+
+#Interpretation:
+
+# In this stage, the non-numeric attributes such as Location and Exchange are analyzed in relation to the cluster assignments to identify potential patterns beyond the financial metrics. By generating frequency tables between the cluster labels and these categorical variables, we can observe how firms are distributed across different regions and stock exchanges.
+
+# This comparison helps determine whether geographical or market-specific factors contribute to the clustering structure. For example, one cluster might predominantly consist of firms headquartered in the United States, reflecting strong financial performance influenced by a developed regulatory environment and access to larger markets. In contrast, another cluster might include a higher proportion of European or Asian firms, indicating different business models or operational focuses shaped by regional economic conditions.
+
+# Analyzing these associations provides contextual depth to the clustering results, revealing that company performance and strategic orientation are not solely defined by quantitative indicators. Instead, non-numeric attributes such as location and market presence may also play a significant role in shaping the financial characteristics that drive the formation of distinct firm groups within the pharmaceutical industry.
+
+```
+
+# 8. Assign Meaningful Cluster Names (Q d)
+
+```{r}
+# Create descriptive cluster names based on centroid interpretation
+
+pharma$Cluster_Name <- recode(pharma$Cluster,
+"1" = "High-Value Stable Firms",
+"2" = "Growth-Oriented Leverage Firms",
+"3" = "Small Emerging Firms")
+head(pharma[, c("Symbol", "Name", "Cluster_Name")])
+
+#Interpretation:
+#Using both numeric and categorical insights:
+
+# 1. Cluster 1 (High-Value Stable): Large, established firms with strong ROE and low Beta.
+# 2. Cluster 2 (Growth-Leverage): Firms with higher leverage and moderate returns.
+# 3. Cluster 3 (Emerging): Smaller firms with lower capitalization and moderate profitability.
+
+#These cluster names capture the financial archetypes in the pharmaceutical industry.
+
+```
+
+
+
+
+# 9. Summary and Business Insight
+
+```{r}
+cat("This k-Means analysis identified 3 meaningful groups of pharmaceutical firms,
+each with distinct financial characteristics.
+These insights can guide investors and analysts in comparing company profiles,
+evaluating risk-return tradeoffs, and forming targeted investment strategies.")
+
+```
+
+
+
+
+
+
+
+
