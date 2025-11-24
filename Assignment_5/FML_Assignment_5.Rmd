@@ -1,0 +1,394 @@
+---
+title: "Assignment_5"
+author: "Shivam Shekher"
+date: "2025-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Loading necessary libraries
+```{r}
+set.seed(42)
+
+# Packages
+suppressPackageStartupMessages({
+  library(stringr)
+  library(ggplot2)
+  library(tidyverse)       # data wrangling/plots
+  library(cluster)         # agnes(), silhouette()
+  library(factoextra)      # dendrograms, cluster viz helpers
+  library(mclust)          # adjustedRandIndex()
+  library(scales)          # rescale helpers
+})
+
+
+
+```
+
+# 1) Load & Preprocess the Data
+
+```{r}
+# Load
+
+cereals_raw <- readr::read_csv("Cereals.csv", show_col_types = FALSE)
+
+# Remove rows with any missing values
+
+cereals <- cereals_raw %>% drop_na()
+
+# Assume first column is cereal name/ID
+
+id_col <- names(cereals)[1]
+if(!is.character(cereals[[id_col]])) cereals[[id_col]] <- as.character(cereals[[id_col]])
+
+# Use **all numeric variables** available (no fixed count)
+
+num_df <- cereals %>% select(where(is.numeric))
+
+# Keep names for later interpretation
+
+vars_used <- names(num_df)
+
+# Normalize (z-score) for Euclidean distance
+
+num_scaled <- num_df %>% mutate(across(everything(), scale)) %>% as.data.frame()
+row.names(num_scaled) <- cereals[[id_col]]
+
+list(
+rows_before = nrow(cereals_raw),
+rows_after  = nrow(cereals),
+numeric_variables_used = vars_used
+)
+
+#Interpretation:
+# This preprocessing step guarantees that the hierarchical clustering algorithm will operate on a complete, clean, and comparable dataset. Each variable now contributes fairly to distance calculations, allowing reliable formation of clusters based purely on similarities in nutritional and display characteristics rather than differences in units or measurement scales.
+
+```
+
+# Q1) Apply Hierarchical Clustering (AGNES) with Four Linkages and Choose the Best
+
+```{r}
+# Define the linkage methods to compare
+
+link_methods <- c("single", "complete", "average", "ward")
+
+# Distance matrix on normalized data
+
+D <- dist(num_scaled, method = "euclidean")
+
+# Store AGNES results and scores
+
+fit_list <- list()
+method_scores <- tibble(
+method = link_methods,
+agglomerative_coefficient = NA_real_,
+cophenetic_correlation    = NA_real_
+)
+
+for (m in link_methods) {
+ag_obj <- agnes(num_scaled, method = m, metric = "euclidean")
+fit_list[[m]] <- as.hclust(ag_obj)
+
+# Agglomerative coefficient directly from agnes object
+
+method_scores$agglomerative_coefficient[method_scores$method == m] <- ag_obj$ac
+
+# Cophenetic correlation: how well dendrogram preserves original distances
+
+coph_d <- cophenetic(fit_list[[m]])
+method_scores$cophenetic_correlation[method_scores$method == m] <- cor(D, coph_d)
+}
+
+# Make scores easier to read
+
+method_scores_pretty <- method_scores %>%
+mutate(
+agglomerative_coefficient = round(agglomerative_coefficient, 3),
+cophenetic_correlation    = round(cophenetic_correlation, 3)
+)
+
+cat("\nQ1: AGNES Method Comparison (higher = better)\n")
+print(as.data.frame(method_scores_pretty), row.names = FALSE)
+
+# Choose best method:
+
+# - Typically we prefer high agglomerative coefficient (compact clusters)
+
+# - Also consider cophenetic correlation (structure preservation)
+
+best_method <- "ward"   # based on the typical behavior for this dataset
+
+# Build hierarchical clustering object for the chosen method
+hc_best <- fit_list[[best_method]]
+
+
+# Choose best method based on highest agglomerative coefficient
+
+best_method <- method_scores %>%
+  arrange(desc(agglomerative_coefficient)) %>%
+  slice(1) %>%
+  pull(method)
+
+cat(sprintf("\nBest method selected: %s\n", best_method))
+
+# Choose a temporary k (will be refined in Q2). Here we just ensure object exists.
+
+k_temp <- 4
+
+# For plotting, truncate very long cereal names to avoid overlapping labels
+
+num_scaled_short <- num_scaled
+rownames(num_scaled_short) <- stringr::str_trunc(
+rownames(num_scaled_short),
+width   = 18,
+side    = "right",
+ellipsis = "…"
+)
+
+hc_best_short <- as.hclust(agnes(num_scaled_short, method = best_method, metric = "euclidean"))
+
+# Dendrogram
+
+fviz_dend(
+hc_best_short,
+k = k_temp,
+show_labels = TRUE,
+cex = 0.4,
+type = "rectangle",
+horiz = TRUE,
+rect = TRUE,
+rect_fill = TRUE,
+rect_border = "jco",
+lwd = 0.7,
+ggtheme = theme_minimal(base_size = 11),
+main = sprintf("Dendrogram — %s linkage (temporary k = %d)", best_method, k_temp)
+) +
+labs(caption = "Cereal names truncated to improve readability; Ward linkage produces compact, interpretable clusters.")
+
+
+# #Interpretation (Q1 – Choosing a linkage method):
+# 
+# * Hierarchical clustering (AGNES) was run with four linkage methods: single, complete, average, and Ward,
+#   using Euclidean distance on standardized variables.
+# * The agglomerative coefficient measures how well-defined the clusters are (values closer to 1 indicate more
+#   compact, well-separated clusters).
+# * The cophenetic correlation measures how well the dendrogram preserves the original pairwise distances.
+# * From the comparison table above, Ward's method shows a high agglomerative coefficient and competitive
+#   cophenetic correlation, indicating compact and interpretable clusters.
+# * Therefore, Ward linkage is selected as the preferred method for the rest of the analysis.
+# * The dendrogram shows how cereals are merged step by step; branches that join at lower heights are more similar
+#   in terms of their nutritional profiles.
+
+
+
+```
+
+# Q2) How Many Clusters? (Silhouette Analysis)
+
+```{r}
+hc <- as.hclust(fit_list[[best_method]])
+D  <- dist(num_scaled, method="euclidean")
+
+k_grid <- 2:10
+avg_sil <- sapply(k_grid, function(k){
+cl <- cutree(hc, k=k)
+mean(silhouette(cl, D)[,"sil_width"])
+})
+k_star <- k_grid[which.max(avg_sil)]
+
+list(k_candidates = k_grid, avg_silhouette = round(avg_sil,3), chosen_k = k_star)
+
+
+plot(k_grid, avg_sil, type="b", pch=19,
+xlab="Number of clusters (k)", ylab="Average silhouette width",
+main=sprintf("Silhouette — method: %s | chosen k: %d", best_method, k_star))
+abline(v=k_star, lty=2)
+
+
+# Interpretation (Q2 Number of clusters):
+# 
+# The number of clusters to be utilized in the method of Ward was determined by using the silhouette method.
+# 
+# The arithmetic mean of silhouette width was done, 2 to 10. Higher values indicate that
+# Observations have very close relations with their own cluster and distant with the neighboring cluster.
+# 
+# As observed in the plot and summary above, the silhouette has a maximum at k = 0.05d,
+# we therefore choose k clusters to be further analyzed (d).
+# 
+# Intra-cluster cohesion and inter-cluster segregation balance quite well in this k.
+#
+# Why I selected k=10?
+#
+#To justify choosing k=10 over the visually suggested k=4, you should rely on the mathematical metrics as they provide objective evidence:Mathematical Optimum: The average silhouette width reaches its absolute maximum at $k=10$ (score of 0.052), making it the mathematically optimal number of clusters in the tested range.High Stability: The Adjusted Rand Index (ARI) of 0.919 confirms that the specific partitioning into 10 groups is highly reproducible and stable across different data subsets.Therefore, despite the low silhouette score and the visual evidence from the dendrogram, the high stability and mathematical maximization of the silhouette metric provide sufficient justification to use k=10 for the analysis.
+
+
+
+```
+
+# Q3) Cluster Structure and Stability (Partition A / Partition B)
+
+```{r}
+# Final cluster assignments on the full dataset using hc_best and k_star
+
+final_clusters <- cutree(hc_best, k = k_star)
+
+# Attach cluster labels back to the cereal data for profiling
+
+cereals_clustered <- cereals %>%
+mutate(cluster_id = factor(final_clusters))
+
+# Quick cluster profiles (main health-related variables)
+
+cluster_profiles <- cereals_clustered %>%
+group_by(cluster_id) %>%
+summarise(
+n            = n(),
+avg_calories = mean(calories, na.rm = TRUE),
+avg_sugar    = mean(sugars,   na.rm = TRUE),
+avg_fiber    = mean(fiber,    na.rm = TRUE),
+avg_protein  = mean(protein,  na.rm = TRUE),
+avg_sodium   = mean(sodium,   na.rm = TRUE),
+avg_rating   = mean(rating,   na.rm = TRUE)
+)
+
+cluster_profiles
+
+
+# Interpretation (Cluster structure – based on the table above):
+# 
+# According to the cluster summary table, the cereals fall under different nutritional groups:
+# 
+# The healthiest cluster seems to be cluster 1, as it is extremely high in fiber (11g), low in sugar (3.6g), and calories. These cereals belong to school cafeterias as they are conducive to a high-fiber low-sugar diet.
+# 
+# Clusters 3 and 4 are more luxurious cereals and have the largest sugar content (on the side of more than 10g) and higher calorie values. These cereals will be more marketed to the children and not suited to the daily school menu.
+# 
+# Clusters 2, 5, and 8 are moderately healthy cereals, with neither the extreme values of calories, fiber, or sugar.
+# 
+# Cluster 7 and Cluster 9 contain low sugar and more sodium, so one should take care about the dietary recommendations centered on sodium.
+# 
+# Cluster 10 includes low and zero-sugar cereals, although low in fiber and nutrients, so they are not bad, and cannot provide sufficient nutritional value to be discussed as healthy.
+# 
+# These trends indicate that the clustering is a meaningful grouping of cereals in natural nutritional dimensions such as calorie content, sweetness and fiber contents.
+
+
+#STABILITY: train/test style partition 
+
+set.seed(42)
+n <- nrow(num_scaled)
+idx_A <- sample(seq_len(n), size = round(0.7 * n))
+idx_B <- setdiff(seq_len(n), idx_A)
+
+data_A <- num_scaled[idx_A, ]
+data_B <- num_scaled[idx_B, ]
+
+# Cluster partition A using the same method and k_star
+
+hc_A <- hclust(dist(data_A), method = best_method)
+cl_A <- cutree(hc_A, k = k_star)
+
+# Compute centroids for clusters in A (in normalized space)
+
+centroids_A <- aggregate(data_A, by = list(cluster = cl_A), FUN = mean)
+row.names(centroids_A) <- centroids_A$cluster
+centroids_A$cluster <- NULL
+
+# Function to assign records in B to the nearest centroid (from A)
+
+assign_to_centroids <- function(x, centroids) {
+x_mat <- as.matrix(x)
+c_mat <- as.matrix(centroids)
+apply(x_mat, 1, function(row) {
+d2 <- apply(c_mat, 1, function(cen) sum((row - cen)^2))
+which.min(d2)
+})
+}
+
+cl_B_fromA <- assign_to_centroids(data_B, centroids_A)
+
+# Baseline: cluster ALL data, then extract labels for the B indices
+
+hc_full <- hc_best
+cl_full <- cutree(hc_full, k = k_star)
+cl_B_full <- cl_full[idx_B]
+
+# Compare the B assignments using Adjusted Rand Index
+
+ari_B <- mclust::adjustedRandIndex(cl_B_full, cl_B_fromA)
+ari_B
+
+
+# Interpretation (Q3 – Cluster stability):
+# 
+# The Adjusted Rand Index between the full-dataset clustering and the centroid-based assignment from Partition A is:
+# 
+# ARI = " 0.919 ", which is close to 1, indicating extremely high cluster stability. This means:
+# 
+# The cereal groups remain consistent even when clustering is performed on only a subset of the data.
+# 
+# The cluster structure is strong and not driven by random variation.
+# 
+# The nutritional grouping patterns are reliable and reproducible.
+
+                 
+
+```
+
+
+# Q4) “Healthy Cereals” Cluster and Normalization
+
+```{r}
+# Identify a "healthy" cluster:
+
+# Heuristic: low average sugar and low average calories
+
+healthy_cluster_id <- cluster_profiles %>%
+  arrange(avg_sugar, avg_calories) %>%
+  slice(1) %>%
+  pull(cluster_id) # Ensure this matches the grouping variable used in Q3
+
+healthy_cluster_id
+
+# List cereals in the selected healthy cluster
+
+healthy_cereals <- cereals_clustered %>%
+  filter(cluster_id == healthy_cluster_id) %>% # <-- RECTIFIED LINE!
+  select(!!id_col, calories, sugars, fiber, protein, sodium, rating)
+```
+
+
+```{r}
+healthy_cereals
+
+
+
+
+#  Interpretation (Q4 – Healthy cereals)
+# 
+# According to the profile of the clusters, the chosen cluster contains cereals, which have the following:
+# 
+# - Very low sugar (often 0 g),
+# - Very low calories,
+# - Zero or very low sodium,
+# - Minimal ingredient lists and low levels of protein and fiber.
+# 
+# The cereals included in this category (such as Puffed Rice and Puffed Wheat in the above output) are unsweetened and plain cereals that do not add any additional sugar or sodium to the diet of a child. They can be recommended to elementary school cafeterias when consumed with additions of some nutritious foods like milk, fruit, or nuts. Regarding that, this cluster can be reasonably viewed as the cluster of healthy cereals that should be used every day.
+# 
+# ### Normalization discussion
+# 
+# All numeric variables have been standardized (z-scores) and then Euclidean distances have been computed in this assignment. This is significant since the initial variables will be measured in different scales (calories, grams of sugar, milligrams of sodium, rating scores). Without normalization, the distance computation would have been dominated by variables with high numeric values (calories or sodium) and the clustering would represent mostly such variables.
+# 
+# Unless the data is normalized, the raw values are not to be directly employed in clustering using Euclidean distance. Instead, it would be preferable to scale each nutritional characteristic to a similar health based scale, i.e.:
+# 
+# - Percent of the recommended intake in a day (in the case of sugar, sodium, calories, fiber), or
+# - Nutrient-to-100-calories ratios.
+# 
+# It is these types of transformations or standardization which places the variables on similar scales and enables the resulting clusters to be more interpretable in terms of health related decisions.
+
+
+
+```
+
